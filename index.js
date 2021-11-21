@@ -8,6 +8,7 @@ let games = {}; // by gogGameId
 let gogCache = []; // by gogGameId
 let steamList = []; 
 let steamCache = {}; // by steamId
+let accounts = [];
 
 let progressCallback = function(progress) {
     console.log(progress)
@@ -43,8 +44,10 @@ function init() {
     
     Promise.all(fileLoadPromises).then(() => {
         updateGogGames().then(() => {
-            fetchSteamData().then(() => {
-                saveToFile()
+            updateGogAccounts().then(() => {
+                fetchSteamData().then(() => {
+                    saveToFile()
+                })
             })
         })
     })
@@ -130,6 +133,42 @@ function fetchSteamData() {
     return Promise.all(steamListingPromises)
 }
 
+function updateGogAccounts() {
+    reportProgress({
+        type: 'overall',
+        description: 'Querying GOG DB Accounts'
+    });
+    // NUKE the previous info
+    accounts = [];
+    let db = new sqlite3.Database('C:\\ProgramData\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db', (err) => {
+        if (err) {
+            console.error(err.message);
+        }
+    });
+
+    let accountsSql = `SELECT * FROM ExternalAccounts;`;
+
+    return new Promise((resolve, reject) => {
+        // Loop through accounts query results
+        db.all(accountsSql, [], (err, rows) => {
+            if (err) {
+                reject();
+                // throw err;
+            }
+            rows.forEach((row) => {
+                accounts.push({
+                    platform: row.externalPlatform,
+                    id: row.externalUserId,
+                    username: row.userName,
+                });
+            });
+            resolve();
+        });
+        // close the database connection
+        db.close();
+    })
+}
+
 // TODO fix
 // this resets the games and gog cache? maybe that's okay?
 function updateGogGames() {
@@ -189,7 +228,9 @@ function updateGogGames() {
                 LastPlayedDates.lastPlayedDate,
                 ReleaseProperties.gameId,
                 installed.installed,
-                DiskSizes.diskSize
+                DiskSizes.diskSize,
+                LibraryReleases.id as libraryId,
+                LicensedReleases.isOwned as isOwned
             FROM (SELECT GamePieces.releaseKey, -- This query groups all gamePieces by releaseKey
                 (case when gamePieceTypeId = ${$gamePieceTypes.myRating} then value end) as myRating,
                 (case when gamePieceTypeId = ${$gamePieceTypes.sortingTitle} then value end) as sortingTitle,
@@ -224,6 +265,10 @@ function updateGogGames() {
             ON games.releaseKey = LastPlayedDates.gameReleaseKey
             LEFT JOIN ReleaseProperties
             ON games.releaseKey = ReleaseProperties.releaseKey
+            LEFT JOIN LibraryReleases
+            ON games.releaseKey = LibraryReleases.releaseKey
+            LEFT JOIN LicensedReleases
+            ON LibraryReleases.id = LicensedReleases.libraryId
             INNER JOIN GameLinks
             ON games.releaseKey = GameLinks.releaseKey
             GROUP BY games.releaseKey;`;
@@ -447,6 +492,19 @@ function parseSteamDetails(game) {
 // saves all variables to json files
 // return null
 function saveToFile() {
+    const accountData = new Uint8Array(Buffer.from(JSON.stringify({
+        type: "gogExtractorAccounts",
+        version: 1,
+        accounts: accounts
+    })));
+    fs.writeFile('output/accounts.json', accountData, (err) => {
+        if (err) throw err;
+        reportProgress({
+            type: 'overall',
+            description: 'Accounts saved!'
+        });
+    });
+
     const gamesData = new Uint8Array(Buffer.from(JSON.stringify({
         type: "gogExtractorGames",
         version: 1,

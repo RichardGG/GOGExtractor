@@ -5,6 +5,9 @@ USAGE
 npm install
 node ./index.js
 
+# You may need to use the following if running into memory issues
+node --max-old-space-size=4096 ./index.js
+
 EXAMPLE JSON
 "52819909153584447": {
     "title": "Half-Life: Alyx",
